@@ -1,0 +1,8 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+transformers>=4.40.0
+torch>=2.2.0
+Pillow>=10.3.0
+pytesseract>=0.3.10
+pdf2image>=1.17.0
+sentencepiece>=0.2.0
