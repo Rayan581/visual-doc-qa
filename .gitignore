@@ -27,3 +27,6 @@ Thumbs.db
 .env
 *token*
 *.log
+
+# LaTeX Files
+report.tex
