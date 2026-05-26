@@ -31,6 +31,7 @@ from collections import Counter
 from contextlib import asynccontextmanager
 from typing import List, Tuple
 
+import os
 import torch
 import uvicorn
 import pytesseract
@@ -39,6 +40,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
 from transformers import AutoProcessor, UdopForConditionalGeneration
+
+# ── Windows Tesseract Path Autodetect ──────────────────────────────────────────
+tesseract_default_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+if os.path.exists(tesseract_default_path):
+    pytesseract.pytesseract.tesseract_cmd = tesseract_default_path
 
 # ── optional PDF support ──────────────────────────────────────────────────────
 try:
@@ -77,6 +83,11 @@ STOPWORDS = {
     "me","my","your","their","its","our","we","i","you","he",
     "she","they","it","any","all","some","no","not","just",
 }
+
+# In-memory document session cache (max 5 documents to prevent memory leaks)
+# key: MD5 file hash (str)
+# value: dict with {"pages": List, "ocr_texts": Dict[int, str], "qa_cache": Dict[str, dict], "timestamp": float}
+DOCUMENT_CACHE = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,12 +207,23 @@ def tokenize(text: str) -> List[str]:
     return [w for w in words if w not in STOPWORDS]
 
 
-def ocr_page(image: Image.Image) -> str:
+def ocr_page(image: Image.Image, file_hash: str = None, page_idx: int = None) -> str:
+    if file_hash and page_idx is not None:
+        cache_entry = DOCUMENT_CACHE.get(file_hash)
+        if cache_entry and page_idx in cache_entry["ocr_texts"]:
+            log.info(f"    [OCR CACHE HIT] Page {page_idx + 1}")
+            return cache_entry["ocr_texts"][page_idx]
+
     try:
-        return pytesseract.image_to_string(image)
+        text = pytesseract.image_to_string(image)
     except Exception as e:
         log.warning(f"OCR error: {e}")
-        return ""
+        text = ""
+
+    if file_hash and page_idx is not None and file_hash in DOCUMENT_CACHE:
+        DOCUMENT_CACHE[file_hash]["ocr_texts"][page_idx] = text
+
+    return text
 
 
 def relevance_score(page_text: str, question_tokens: List[str]) -> float:
@@ -262,6 +284,7 @@ def strategy_all(pages: List[Image.Image], question: str) -> dict:
 def strategy_smart(
     pages: List[Image.Image],
     question: str,
+    file_hash: str = None,
     top_n: int = SMART_TOP_N,
 ) -> dict:
     log.info(f"[SMART] OCR-ranking {len(pages)} pages, top-{top_n} candidates …")
@@ -272,7 +295,7 @@ def strategy_smart(
     ranked: List[Tuple[int, float]] = []
     idx = 0
     while idx < len(pages):
-        text  = ocr_page(pages[idx])
+        text  = ocr_page(pages[idx], file_hash, idx)
         score = relevance_score(text, q_tokens)
         ranked.append((idx, score))
         log.info(f"  Page {idx+1}: relevance={score:.2f}")
@@ -358,12 +381,44 @@ async def ask(
     file_bytes   = await file.read()
     content_type = (file.content_type or "").lower()
 
-    try:
-        pages = load_pages(file_bytes, content_type)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not open file: {e}")
+    # ── Cache Level 1 & 2 ─────────────────────────────────────────────────────
+    import hashlib
+    file_hash = hashlib.md5(file_bytes).hexdigest()
+
+    # Level 1 Cache: Exact same document + exact same question
+    if file_hash in DOCUMENT_CACHE:
+        cache_entry = DOCUMENT_CACHE[file_hash]
+        cache_entry["timestamp"] = time.time()  # Refresh LRU timestamp
+        if question in cache_entry["qa_cache"]:
+            log.info(f"🏆 [CACHE HIT L1] Direct Q&A match for: '{question}'")
+            cached_res = dict(cache_entry["qa_cache"][question])
+            # Tag it so the UI shows it was cached
+            cached_res["strategy"] = cached_res.get("strategy", "") + " (cached)"
+            return JSONResponse(cached_res)
+
+        pages = cache_entry["pages"]
+        log.info(f"⚡ [CACHE HIT L2] Reused loaded pages/images for hash {file_hash}")
+    else:
+        try:
+            pages = load_pages(file_bytes, content_type)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not open file: {e}")
+
+        # Initialize cached entry
+        DOCUMENT_CACHE[file_hash] = {
+            "pages": pages,
+            "ocr_texts": {},
+            "qa_cache": {},
+            "timestamp": time.time(),
+        }
+
+        # Evict oldest if limit exceeded
+        if len(DOCUMENT_CACHE) > 5:
+            oldest_hash = min(DOCUMENT_CACHE.keys(), key=lambda h: DOCUMENT_CACHE[h]["timestamp"])
+            DOCUMENT_CACHE.pop(oldest_hash)
+            log.info(f"🧹 Cache pruned oldest entry: {oldest_hash}")
 
     log.info(f"Loaded {len(pages)} page(s).")
 
@@ -378,27 +433,32 @@ async def ask(
         if answer_quality(answer) == 0.0:
             answer = "No answer found in the document."
 
-        return JSONResponse({
+        result = {
             "answer":         answer,
             "page":           1,
             "strategy":       "single",
             "pages_searched": 1,
             "total_pages":    1,
             "inference_time": t,
-        })
+        }
+        # Save to Q&A Cache
+        DOCUMENT_CACHE[file_hash]["qa_cache"][question] = result
+        return JSONResponse(result)
 
     # Multi-page
     try:
         if strategy == "all":
             result = strategy_all(pages, question)
         else:
-            result = strategy_smart(pages, question)
+            result = strategy_smart(pages, question, file_hash=file_hash)
     except HTTPException:
         raise
     except Exception as e:
         log.exception("Strategy failed")
         raise HTTPException(status_code=500, detail=f"Processing error: {e}")
 
+    # Save to Q&A Cache
+    DOCUMENT_CACHE[file_hash]["qa_cache"][question] = result
     log.info(f"Result: {result}")
     return JSONResponse(result)
 

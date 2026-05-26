@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
@@ -108,9 +109,9 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
   final ScrollController      _scroll      = ScrollController();
   final FocusNode             _focus       = FocusNode();
 
-  File?    _file;
-  String?  _fileName;
-  int?     _fileSize;
+  Uint8List? _fileBytes;
+  String?    _fileName;
+  int?       _fileSize;
   bool     _online    = false;
   bool     _loading   = false;
   String   _strategy  = 'smart';
@@ -168,19 +169,29 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: extensions,
+      withData: true,
     );
-    if (result?.files.single.path == null) return;
+    if (result == null || result.files.isEmpty) return;
 
-    final picked = File(result!.files.single.path!);
-    final stat   = await picked.stat();
+    final pickedFile = result.files.first;
+    Uint8List? bytes = pickedFile.bytes;
+
+    if (bytes == null && pickedFile.path != null) {
+      bytes = await File(pickedFile.path!).readAsBytes();
+    }
+
+    if (bytes == null) {
+      _addSys('Failed to load file content.');
+      return;
+    }
 
     setState(() {
-      _file     = picked;
-      _fileName = result.files.single.name;
-      _fileSize = stat.size;
+      _fileBytes = bytes;
+      _fileName  = pickedFile.name;
+      _fileSize  = pickedFile.size;
     });
 
-    _addSys('Document loaded: $_fileName  (${_fmtBytes(stat.size)})');
+    _addSys('Document loaded: $_fileName  (${_fmtBytes(pickedFile.size)})');
   }
 
   String _fmtBytes(int b) {
@@ -194,7 +205,7 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
     final q = _q.text.trim();
     if (q.isEmpty || _loading) return;
 
-    if (_file == null) {
+    if (_fileBytes == null) {
       _addSys('No document loaded. Upload a document to begin analysis.');
       return;
     }
@@ -211,7 +222,11 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
       final req = http.MultipartRequest('POST', Uri.parse('$_backend/ask'));
       req.fields['question'] = q;
       req.fields['strategy'] = _strategy;
-      req.files.add(await http.MultipartFile.fromPath('file', _file!.path));
+      req.files.add(http.MultipartFile.fromBytes(
+        'file',
+        _fileBytes!,
+        filename: _fileName,
+      ));
 
       final streamed = await req.send().timeout(const Duration(seconds: 300));
       final body     = await streamed.stream.bytesToString();
@@ -276,13 +291,13 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
           child: Row(children: [
             // ── Left: document panel
             _DocumentPanel(
-              file:       _file,
+              hasFile:    _fileBytes != null,
               fileName:   _fileName,
               fileSize:   _fileSize,
               pdfSupport: _pdfSupport,
               online:     _online,
               onPick:     _pickFile,
-              onClear:    () => setState(() { _file = _fileName = _fileSize = null; }),
+              onClear:    () => setState(() { _fileBytes = _fileName = _fileSize = null; }),
             ),
             // ── Divider
             Container(width: 1, color: C.border),
@@ -295,7 +310,7 @@ class _MainShellState extends State<MainShell> with TickerProviderStateMixin {
                 qCtrl:     _q,
                 focus:     _focus,
                 loading:   _loading,
-                hasFile:   _file != null,
+                hasFile:   _fileBytes != null,
                 onSend:    _send,
               ),
             ),
@@ -451,7 +466,7 @@ class _StrategyToggle extends StatelessWidget {
 
 // ─── Document Panel (left) ───────────────────────────────────────────────────
 class _DocumentPanel extends StatefulWidget {
-  final File?        file;
+  final bool         hasFile;
   final String?      fileName;
   final int?         fileSize;
   final bool         pdfSupport;
@@ -460,7 +475,7 @@ class _DocumentPanel extends StatefulWidget {
   final VoidCallback onClear;
 
   const _DocumentPanel({
-    required this.file,
+    required this.hasFile,
     required this.fileName,
     required this.fileSize,
     required this.pdfSupport,
@@ -522,7 +537,7 @@ class _DocumentPanelState extends State<_DocumentPanel> with SingleTickerProvide
         ),
 
         Expanded(
-          child: widget.file == null ? _emptyState() : _loadedState(),
+          child: !widget.hasFile ? _emptyState() : _loadedState(),
         ),
 
         // Footer: supported formats
