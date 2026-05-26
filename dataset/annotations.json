@@ -1,0 +1,77 @@
+{
+    "dataset_name": "DocChat evaluation benchmark subset",
+    "total_documents": 3,
+    "format": "png",
+    "samples": [
+        {
+            "file_name": "sample_invoice.png",
+            "document_type": "invoice",
+            "annotations": [
+                {
+                    "question": "What is the invoice number?",
+                    "answer": "GT-98432"
+                },
+                {
+                    "question": "Who is the customer?",
+                    "answer": "John Doe"
+                },
+                {
+                    "question": "What is the billing date?",
+                    "answer": "2026-05-24"
+                },
+                {
+                    "question": "What is the total due?",
+                    "answer": "$205.70"
+                },
+                {
+                    "question": "What is the tax amount?",
+                    "answer": "$18.70"
+                }
+            ]
+        },
+        {
+            "file_name": "sample_receipt.png",
+            "document_type": "receipt",
+            "annotations": [
+                {
+                    "question": "What cafe name is in the receipt?",
+                    "answer": "STAR CAFE & BAKERY"
+                },
+                {
+                    "question": "What is the total paid?",
+                    "answer": "$25.73"
+                },
+                {
+                    "question": "What is the date on the receipt?",
+                    "answer": "26-05-2026"
+                },
+                {
+                    "question": "How many double espressos were ordered?",
+                    "answer": "1x"
+                }
+            ]
+        },
+        {
+            "file_name": "sample_form.png",
+            "document_type": "registration form",
+            "annotations": [
+                {
+                    "question": "What is the student name?",
+                    "answer": "John Doe"
+                },
+                {
+                    "question": "What is the student ID?",
+                    "answer": "FAST-2026-88"
+                },
+                {
+                    "question": "What department is selected?",
+                    "answer": "Computer Science"
+                },
+                {
+                    "question": "Who is the course instructor?",
+                    "answer": "Dr. Sarah Khan"
+                }
+            ]
+        }
+    ]
+}
