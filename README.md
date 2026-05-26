@@ -1,5 +1,12 @@
 # 📑 DocChat — Advanced Visual Document Intelligence
 
+### 👥 Group Members & Authors
+*   **Rayan Ahmed** — [i230018@isb.nu.edu.pk](mailto:i230018@isb.nu.edu.pk)
+*   **Raza Ahmad** — [i230060@isb.nu.edu.pk](mailto:i230060@isb.nu.edu.pk)
+*   **Awwab Ahmad** — [i230079@isb.nu.edu.pk](mailto:i230079@isb.nu.edu.pk)
+
+---
+
 DocChat is a state-of-the-art visual document understanding and question-answering assistant. Built with a high-performance **FastAPI** backend and a sleek, ultra-modern **Flutter Web/Desktop** client, DocChat enables users to upload scanned documents, invoices, receipts, forms, or hand-written notes and ask questions about their content. 
 
 Under the hood, the document reasoning is powered by Microsoft's massive multimodal **UDOP** (Unified Document Processing) transformer model, allowing it to seamlessly synthesize both textual content and spatial layout features.
